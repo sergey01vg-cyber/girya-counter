@@ -51,6 +51,12 @@
   .state-pill.hold{color:var(--accent2);border-color:var(--accent2);}
   .cam-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;color:var(--muted);font-size:14px;padding:24px;pointer-events:none;}
+  .rec-dot{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:none;
+    align-items:center;gap:6px;background:rgba(11,15,23,.6);border:1px solid var(--danger);
+    color:#fff;border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;z-index:6;pointer-events:none;}
+  .rec-dot i{width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block;
+    animation:blink 1s steps(2,start) infinite;}
+  @keyframes blink{50%{opacity:.15;}}
   .countdown{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     background:rgba(11,15,23,.55);backdrop-filter:blur(3px);pointer-events:none;z-index:5;}
   .countdown.show{display:flex;}
@@ -130,11 +136,16 @@
       <div class="cd-num" id="cdNum">10</div>
       <div class="cd-lbl" id="cdLbl">Отойдите и приготовьтесь</div>
     </div>
+    <div class="rec-dot" id="recDot"><i></i>REC</div>
   </div>
 
   <div class="row">
     <button id="camBtn">▶ Камера</button>
     <button class="sec" id="flipBtn">⟳ Сменить камеру</button>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button class="sec" id="recBtn">⏺ Запись видео</button>
+    <button class="sec" id="saveVidBtn" disabled>⬇ Сохранить видео</button>
   </div>
 
   <!-- Modes -->
@@ -341,6 +352,7 @@ function startCountdown(){
   },1000);
 }
 function stopCamera(){
+  if(typeof stopRec==='function') stopRec();   // финализируем запись, пока трек ещё жив
   running=false; counting=false;
   if(cdTimer){ clearInterval(cdTimer); cdTimer=null; }
   countdownEl.classList.remove('show','go');
@@ -374,6 +386,59 @@ camBtn.onclick = ()=>{ if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume
 flipBtn.onclick = async ()=>{
   facing = (facing==='environment')?'user':'environment';
   if(running){ stopCamera(); await new Promise(r=>setTimeout(r,250)); startCamera(); }
+};
+
+/* ---------- Video recording ---------- */
+const recBtn = document.getElementById('recBtn');
+const saveVidBtn = document.getElementById('saveVidBtn');
+const recDot = document.getElementById('recDot');
+let mediaRecorder=null, recChunks=[], recBlobUrl=null, recMime='', recExt='webm', recStart=0, recTimer=null;
+function pickMime(){
+  const cands=['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  if(!('MediaRecorder' in window)) return '';
+  for(const m of cands){ try{ if(MediaRecorder.isTypeSupported(m)) return m; }catch(e){} }
+  return '';
+}
+function startRec(){
+  if(!stream){ alert('Сначала включите камеру.'); return; }
+  if(!('MediaRecorder' in window)){ alert('Запись видео не поддерживается этим браузером.'); return; }
+  recChunks=[]; recMime=pickMime();
+  try{ mediaRecorder = new MediaRecorder(stream, recMime?{mimeType:recMime}:undefined); }
+  catch(e){ alert('Не удалось начать запись: '+e.message); return; }
+  recExt = ((mediaRecorder.mimeType||recMime||'')).includes('mp4') ? 'mp4' : 'webm';
+  mediaRecorder.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = ()=>{
+    if(!recChunks.length) return;
+    const blob = new Blob(recChunks, {type: recMime || 'video/webm'});
+    if(recBlobUrl) URL.revokeObjectURL(recBlobUrl);
+    recBlobUrl = URL.createObjectURL(blob);
+    saveVidBtn.disabled = false;
+    saveVidBtn.textContent = '⬇ Сохранить видео ('+(blob.size/1048576).toFixed(1)+' МБ)';
+  };
+  mediaRecorder.start(1000);
+  recStart = performance.now();
+  recDot.style.display='flex';
+  recBtn.classList.add('danger');
+  recTimer = setInterval(()=>{
+    const s=Math.floor((performance.now()-recStart)/1000);
+    recBtn.textContent='■ Стоп ('+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')+')';
+  },500);
+  recBtn.textContent='■ Стоп (00:00)';
+}
+function stopRec(){
+  if(mediaRecorder && mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} }
+  mediaRecorder=null;
+  if(recTimer){ clearInterval(recTimer); recTimer=null; }
+  recDot.style.display='none';
+  recBtn.classList.remove('danger');
+  recBtn.textContent='⏺ Запись видео';
+}
+recBtn.onclick = ()=>{ (mediaRecorder && mediaRecorder.state==='recording') ? stopRec() : startRec(); };
+saveVidBtn.onclick = ()=>{
+  if(!recBlobUrl){ alert('Сначала запишите видео.'); return; }
+  const a=document.createElement('a'); a.href=recBlobUrl;
+  a.download='trenirovka_girya_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.'+recExt;
+  document.body.appendChild(a); a.click(); a.remove();
 };
 
 /* ---------- Keypoint indices (MoveNet) ---------- */
