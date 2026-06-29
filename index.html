@@ -44,9 +44,11 @@
   .rep-box .num{font-size:64px;font-weight:800;line-height:1;color:var(--accent);
     font-variant-numeric:tabular-nums;}
   .rep-box .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+  .rep-box .tempo{font-size:14px;color:var(--accent2);font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums;}
   .state-pill{align-self:flex-end;font-size:12px;background:rgba(11,15,23,.55);
     border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:6px 12px;}
   .state-pill.up{color:var(--accent);border-color:var(--accent);}
+  .state-pill.hold{color:var(--accent2);border-color:var(--accent2);}
   .cam-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;color:var(--muted);font-size:14px;padding:24px;pointer-events:none;}
   .countdown{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
@@ -85,6 +87,15 @@
   .laps div{display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--line);color:var(--muted);}
   .laps div span:last-child{color:var(--text);font-weight:700;}
 
+  .hist{margin-top:12px;font-size:13px;font-variant-numeric:tabular-nums;}
+  .hist .empty{color:var(--muted);padding:6px 2px;}
+  .hist .item{display:flex;justify-content:space-between;align-items:center;gap:8px;
+    padding:9px 4px;border-bottom:1px solid var(--line);}
+  .hist .item .meta{color:var(--muted);font-size:11px;margin-top:2px;}
+  .hist .item b{color:var(--accent);font-size:16px;}
+  .hist .item .ex{color:var(--text);font-weight:700;}
+  .hist .item .del{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--muted);
+    border-radius:10px;padding:6px 10px;font-size:13px;cursor:pointer;}
   .opts{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center;}
   .opts label{display:flex;align-items:center;gap:6px;cursor:pointer;}
   input[type=range]{flex:1;accent-color:var(--accent);}
@@ -108,6 +119,7 @@
       <div class="rep-box">
         <div class="num" id="repNum">0</div>
         <div class="lbl">повторений</div>
+        <div class="tempo" id="tempoVal">— /мин</div>
       </div>
       <div class="state-pill" id="statePill">внизу</div>
     </div>
@@ -162,6 +174,19 @@
     </div>
     <div class="laps" id="laps"></div>
   </div>
+
+  <!-- Workouts / memory -->
+  <div class="panel">
+    <h2>Тренировки</h2>
+    <div class="row">
+      <button id="saveBtn">💾 Сохранить подход</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="sec" id="exportBtn">⬇ Скачать CSV</button>
+      <button class="ghost" id="clearHistBtn">Очистить</button>
+    </div>
+    <div class="hist" id="hist"></div>
+  </div>
 </main>
 
 <footer>Подсчёт идёт по распознаванию позы прямо на устройстве. Видео никуда не передаётся.</footer>
@@ -181,6 +206,7 @@ const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
 const octx = overlay.getContext('2d');
 const repNum = document.getElementById('repNum');
+const tempoVal = document.getElementById('tempoVal');
 const statePill = document.getElementById('statePill');
 const camMsg = document.getElementById('camMsg');
 const camBtn = document.getElementById('camBtn');
@@ -202,9 +228,12 @@ let counting = false, cdTimer = null;
 let facing = 'environment';
 let mode = 'jerk';
 let reps = 0;
-let repState = 'down';      // 'down' | 'up'
-let lastCountTime = 0;
-const MIN_REP_MS = 350;     // защита от двойного счёта
+let repTimes = [];          // метки времени засчитанных повторений (для темпа)
+let curTempo = 0;           // текущий темп, повт./мин
+const MODE_NAMES = { jerk:'Толчок', longcycle:'Длинный цикл', snatch:'Рывок' };
+let repState = 'down';      // 'down' | 'holding' | 'counted'
+let holdStart = 0;          // когда руки зашли в верхнюю фиксацию
+const HOLD_MS = 500;        // обязательная фиксация вверху, мс
 
 /* ---------- Modes ---------- */
 document.getElementById('modes').addEventListener('click', e=>{
@@ -221,10 +250,18 @@ mirrorChk.addEventListener('change', applyMirror);
 applyMirror();
 
 /* ---------- Manual adjust ---------- */
-document.getElementById('plusBtn').onclick = ()=>{ reps++; updateReps(); };
-document.getElementById('minusBtn').onclick = ()=>{ reps=Math.max(0,reps-1); updateReps(); };
-document.getElementById('resetRepsBtn').onclick = ()=>{ reps=0; repState='down'; updateReps(); };
+document.getElementById('plusBtn').onclick = ()=>{ reps++; repTimes.push(performance.now()); updateReps(); updateTempo(); };
+document.getElementById('minusBtn').onclick = ()=>{ reps=Math.max(0,reps-1); repTimes.pop(); updateReps(); updateTempo(); };
+document.getElementById('resetRepsBtn').onclick = ()=>{ reps=0; repState='down'; repTimes=[]; updateReps(); updateTempo(); };
 function updateReps(){ repNum.textContent = reps; }
+function updateTempo(){
+  if(repTimes.length<2){ curTempo=0; tempoVal.textContent='— /мин'; return; }
+  const last = repTimes.slice(-6);              // средний темп по последним повторам
+  let sum=0; for(let i=1;i<last.length;i++) sum += last[i]-last[i-1];
+  const avg = sum/(last.length-1);
+  curTempo = Math.round(60000/avg);
+  tempoVal.textContent = curTempo+' /мин';
+}
 
 /* ---------- Sound / Voice ---------- */
 let audioCtx=null;
@@ -250,7 +287,7 @@ function speak(n){
   }catch(e){}
 }
 function onRep(){
-  reps++; updateReps(); beep(); speak(reps);
+  reps++; repTimes.push(performance.now()); updateReps(); updateTempo(); beep(); speak(reps);
   repNum.animate([{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:200});
 }
 
@@ -282,7 +319,7 @@ async function startCamera(){
 }
 function startCountdown(){
   // сброс счёта на старте новой попытки
-  reps=0; repState='down'; updateReps();
+  reps=0; repState='down'; repTimes=[]; updateReps(); updateTempo();
   if(!countdownChk.checked){ counting=true; return; }
   counting=false;
   let n=10;
@@ -346,46 +383,61 @@ const CONF=0.3;
 function pt(kps,i){ const k=kps[i]; return (k&&k.score>=CONF)?k:null; }
 
 /* ---------- Rep detection ----------
-   Логика для гиревого спорта: повторение засчитывается при фиксации
-   снаряда над головой (запястье выше уровня глаз/носа) и возврате вниз
-   (запястье ниже линии плеч). Гистерезис убирает дребезг.        */
+   Гиревой спорт. Повторение засчитывается ТОЛЬКО при фиксации снаряда над
+   головой на вытянутых руках не менее HOLD_MS (0,5 с), затем — возврат вниз.
+   • Рывок: фиксация одной вытянутой руки вверху.
+   • Толчок / длинный цикл: фиксация обеих рук вверху.
+   «Вытянутая рука» = запястье выше глаз И локоть выше плеча (рука выпрямлена). */
 function detectRep(kps){
   if(!counting) return;                             // ждём окончания обратного отсчёта
   const sens = +sensRange.value/100;                // 0..1
   const nose = pt(kps,KP.nose) || pt(kps,KP.leftEye) || pt(kps,KP.rightEye);
   const ls = pt(kps,KP.leftShoulder), rs = pt(kps,KP.rightShoulder);
+  const le = pt(kps,KP.leftElbow),    re = pt(kps,KP.rightElbow);
   const lw = pt(kps,KP.leftWrist),    rw = pt(kps,KP.rightWrist);
   if(!nose || (!ls&&!rs)) return;
 
   const shoulderY = (ls&&rs)?(ls.y+rs.y)/2 : (ls?ls.y:rs.y);
-  // порог «вверху»: чуть выше глаз; чувствительность сдвигает порог
-  const upLine   = nose.y - (shoulderY-nose.y)*0.15*(1-sens);
-  const downLine = shoulderY;                       // ниже плеч = «внизу»
+  const upLine   = nose.y - (shoulderY-nose.y)*0.15*(1-sens);  // «вверху»: выше глаз
+  const downLine = shoulderY;                                  // «внизу»: ниже плеч
 
-  const wristAbove = (w)=> w && w.y < upLine;
+  // Рука зафиксирована вверху: запястье выше линии глаз, и (если виден локоть)
+  // локоть выше плеча и запястье выше локтя => рука действительно выпрямлена.
+  const armLocked = (w,e,s)=>{
+    if(!w || w.y >= upLine) return false;
+    if(e && s) return e.y < s.y && w.y < e.y + 10;  // выпрямлена вверх
+    return true;                                     // локоть не виден — судим по запястью
+  };
   const wristBelow = (w)=> w && w.y > downLine;
 
   let isUp, isDown;
   if(mode==='snatch'){
-    // одна рука вверху достаточно
-    isUp   = wristAbove(lw) || wristAbove(rw);
-    isDown = (wristBelow(lw) || wristBelow(rw)) && !wristAbove(lw) && !wristAbove(rw);
-  } else {
-    // jerk / longcycle: обе руки фиксируются вверху
-    isUp   = wristAbove(lw) && wristAbove(rw);
+    isUp   = armLocked(lw,le,ls) || armLocked(rw,re,rs);
+    isDown = (wristBelow(lw) || wristBelow(rw)) && !armLocked(lw,le,ls) && !armLocked(rw,re,rs);
+  } else {                                           // jerk / longcycle: обе руки
+    isUp   = armLocked(lw,le,ls) && armLocked(rw,re,rs);
     isDown = wristBelow(lw) && wristBelow(rw);
   }
 
-  if(repState==='down' && isUp){
-    const now=performance.now();
-    if(now-lastCountTime>MIN_REP_MS){
-      repState='up'; lastCountTime=now; onRep();
-      statePill.textContent='вверху'; statePill.classList.add('up');
+  const now = performance.now();
+  if(repState==='down'){
+    if(isUp){ repState='holding'; holdStart=now; setPill('фиксация…', 'hold'); }
+  } else if(repState==='holding'){
+    if(!isUp){ repState='down'; setPill('внизу', ''); }       // сорвал фиксацию рано
+    else if(now - holdStart >= HOLD_MS){                       // выдержал 0,5 с
+      repState='counted'; onRep(); setPill('зачтено', 'up');
+    } else {
+      const left = Math.ceil((HOLD_MS-(now-holdStart))/100)/10;
+      setPill('держите '+left.toFixed(1)+'с', 'hold');
     }
-  } else if(repState==='up' && isDown){
-    repState='down';
-    statePill.textContent='внизу'; statePill.classList.remove('up');
+  } else if(repState==='counted'){
+    if(isDown){ repState='down'; setPill('внизу', ''); }
   }
+}
+function setPill(text, cls){
+  statePill.textContent = text;
+  statePill.classList.toggle('up', cls==='up');
+  statePill.classList.toggle('hold', cls==='hold');
 }
 
 /* ---------- Skeleton drawing ---------- */
@@ -446,6 +498,58 @@ swReset.onclick=()=>{
   swLap.disabled=true; swReset.disabled=true;
 };
 renderTimer();
+function swValue(){ return swElapsed + (swRunning?performance.now()-swT0:0); }
+function fmtPlain(ms){ return fmt(ms).replace(/<\/?small>/g,''); }
+
+/* ---------- Workouts: память телефона (localStorage) ---------- */
+const HKEY='girya_sessions';
+const histEl=document.getElementById('hist');
+const saveBtn=document.getElementById('saveBtn');
+const exportBtn=document.getElementById('exportBtn');
+const clearHistBtn=document.getElementById('clearHistBtn');
+function loadHist(){ try{ return JSON.parse(localStorage.getItem(HKEY)||'[]'); }catch(e){ return []; } }
+function saveHist(arr){ try{ localStorage.setItem(HKEY, JSON.stringify(arr)); }catch(e){ alert('Не удалось сохранить в память устройства.'); } }
+function renderHist(){
+  const arr=loadHist();
+  if(!arr.length){ histEl.innerHTML='<div class="empty">Пока нет сохранённых подходов.</div>'; return; }
+  histEl.innerHTML='';
+  arr.slice().reverse().forEach(s=>{
+    const dt=new Date(s.ts);
+    const dstr=dt.toLocaleDateString('ru-RU')+' '+dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<div><div class="ex">${s.mode} · <b>${s.reps}</b> повт.</div>`+
+      `<div class="meta">${s.time} · ${s.tempo} /мин · ${dstr}</div></div>`+
+      `<button class="del" data-ts="${s.ts}">✕</button>`;
+    histEl.appendChild(d);
+  });
+}
+saveBtn.onclick=()=>{
+  if(reps<=0){ alert('Сначала сделайте хотя бы одно повторение.'); return; }
+  const arr=loadHist();
+  arr.push({ ts:Date.now(), mode:MODE_NAMES[mode]||mode, reps:reps, time:fmtPlain(swValue()), tempo:curTempo });
+  saveHist(arr); renderHist();
+  const t=saveBtn.textContent; saveBtn.textContent='✓ Сохранено';
+  setTimeout(()=>saveBtn.textContent=t,1500);
+};
+exportBtn.onclick=()=>{
+  const arr=loadHist();
+  if(!arr.length){ alert('Нет данных для выгрузки.'); return; }
+  let csv='Дата;Упражнение;Повторения;Время;Темп (/мин)\n';
+  arr.forEach(s=>{ csv+=`${new Date(s.ts).toLocaleString('ru-RU')};${s.mode};${s.reps};${s.time};${s.tempo}\n`; });
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='trenirovki_girya_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+clearHistBtn.onclick=()=>{ if(confirm('Удалить всю историю тренировок?')){ saveHist([]); renderHist(); } };
+histEl.addEventListener('click', e=>{
+  const b=e.target.closest('.del'); if(!b) return;
+  const ts=+b.dataset.ts;
+  saveHist(loadHist().filter(s=>s.ts!==ts)); renderHist();
+});
+renderHist();
 
 /* keep screen awake if supported */
 let wakeLock=null;
