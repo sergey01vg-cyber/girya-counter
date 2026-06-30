@@ -57,6 +57,15 @@
   .rec-dot i{width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block;
     animation:blink 1s steps(2,start) infinite;}
   @keyframes blink{50%{opacity:.15;}}
+  .hud-timer{position:absolute;left:12px;bottom:12px;z-index:6;pointer-events:none;
+    background:rgba(11,15,23,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.12);
+    border-radius:14px;padding:6px 14px;font-variant-numeric:tabular-nums;font-weight:800;font-size:24px;color:#fff;}
+  .hud-timer.flash{animation:hudflash .6s ease;}
+  @keyframes hudflash{0%{transform:scale(1);}30%{transform:scale(1.25);color:var(--accent);
+    border-color:var(--accent);}100%{transform:scale(1);}}
+  .hud-timer.minute.flash{animation:hudflashM .9s ease;}
+  @keyframes hudflashM{0%{transform:scale(1);}25%{transform:scale(1.4);color:var(--accent2);
+    border-color:var(--accent2);}100%{transform:scale(1);}}
   .countdown{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     background:rgba(11,15,23,.55);backdrop-filter:blur(3px);pointer-events:none;z-index:5;}
   .countdown.show{display:flex;}
@@ -143,6 +152,7 @@
       <div class="cd-lbl" id="cdLbl">Отойдите и приготовьтесь</div>
     </div>
     <div class="rec-dot" id="recDot"><i></i>REC</div>
+    <div class="hud-timer" id="hudTimer">00:00</div>
   </div>
 
   <div class="row">
@@ -438,7 +448,7 @@ async function startCamera(){
 function startCountdown(){
   // сброс счёта на старте новой попытки
   reps=0; repState='down'; repTimes=[]; updateReps(); updateTempo();
-  if(!countdownChk.checked){ counting=true; track('workout_start', {mode}); return; }
+  if(!countdownChk.checked){ counting=true; swBegin(); track('workout_start', {mode}); return; }
   counting=false;
   let n=10;
   countdownEl.classList.add('show'); countdownEl.classList.remove('go');
@@ -454,7 +464,7 @@ function startCountdown(){
       clearInterval(cdTimer); cdTimer=null;
       countdownEl.classList.add('go'); cdNum.textContent='Старт!'; cdLbl.textContent='Начинайте!';
       tone(1040,.4);
-      setTimeout(()=>{ countdownEl.classList.remove('show','go'); counting=true; track('workout_start', {mode}); }, 700);
+      setTimeout(()=>{ countdownEl.classList.remove('show','go'); counting=true; swBegin(); track('workout_start', {mode}); }, 700);
     }
   },1000);
 }
@@ -686,17 +696,63 @@ async function loop(){
 
 /* ---------- Stopwatch ---------- */
 let swT0=0, swElapsed=0, swRunning=false, swId=null, lapCount=0, lastLap=0;
+let lastSeg=0;              // последний пройденный 30-секундный рубеж (для сигналов)
 const timerEl=document.getElementById('timer');
+const hudTimer=document.getElementById('hudTimer');
 const swStart=document.getElementById('swStart'), swLap=document.getElementById('swLap'),
       swReset=document.getElementById('swReset'), lapsEl=document.getElementById('laps');
 function fmt(ms){
   const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000), cs=Math.floor(ms%1000/10);
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}<small>.${String(cs).padStart(2,'0')}</small>`;
 }
-function renderTimer(){ timerEl.innerHTML=fmt(swElapsed + (swRunning?performance.now()-swT0:0)); }
-function tick(){ renderTimer(); swId=requestAnimationFrame(tick); }
+function fmtMS(ms){ const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000);
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
+function renderTimer(){
+  const v = swElapsed + (swRunning?performance.now()-swT0:0);
+  timerEl.innerHTML=fmt(v);
+  hudTimer.textContent=fmtMS(v);
+}
+/* Русское склонение «минута/минуты/минут» */
+function plural(n,a,b,c){ n=Math.abs(n)%100; const n1=n%10;
+  if(n>10&&n<20)return c; if(n1>1&&n1<5)return b; if(n1===1)return a; return c; }
+function markPhrase(secs){
+  if(secs===30) return 'тридцать секунд';
+  if(secs===90) return 'полторы минуты';
+  if(secs%60===0){ const m=secs/60; return m+' '+plural(m,'минута','минуты','минут'); }
+  return null;                       // прочие получасы — только звук, без голоса
+}
+function flashHud(isMin){
+  hudTimer.classList.remove('flash','minute'); void hudTimer.offsetWidth;
+  if(isMin) hudTimer.classList.add('minute');
+  hudTimer.classList.add('flash');
+}
+/* Сигналы на каждом 30-секундном рубеже; на полной минуте — сильнее */
+function cueCheck(){
+  const v = swValue();
+  const seg = Math.floor(v/30000);
+  if(seg<=lastSeg) return;
+  lastSeg = seg;
+  const secs = seg*30;
+  const isMin = secs%60===0;
+  flashHud(isMin);
+  if(soundChk.checked){
+    if(isMin){ tone(1046,.18); setTimeout(()=>tone(1318,.18),180); setTimeout(()=>tone(1568,.30),360); }
+    else { tone(880,.14); setTimeout(()=>tone(880,.16),170); }
+  }
+  if(voiceChk.checked){ const ph=markPhrase(secs); if(ph) speak(ph); }
+}
+function tick(){ renderTimer(); cueCheck(); swId=requestAnimationFrame(tick); }
+/* Старт секундомера с нуля в начале подхода (вызывается после отсчёта) */
+function swBegin(){
+  swRunning=false; cancelAnimationFrame(swId);
+  swElapsed=0; lastLap=0; lapCount=0; lapsEl.innerHTML=''; lastSeg=0;
+  swRunning=true; swT0=performance.now(); tick();
+  swStart.textContent='Пауза'; swStart.classList.add('warn');
+  swLap.disabled=false; swReset.disabled=false;
+}
 swStart.onclick=()=>{
   if(!swRunning){
+    lastSeg=Math.floor(swElapsed/30000);   // не дублировать сигнал при возобновлении
     swRunning=true; swT0=performance.now(); tick();
     swStart.textContent='Пауза'; swStart.classList.add('warn');
     swLap.disabled=false; swReset.disabled=false;
@@ -713,7 +769,7 @@ swLap.onclick=()=>{
   lapsEl.prepend(d);
 };
 swReset.onclick=()=>{
-  swRunning=false; cancelAnimationFrame(swId); swElapsed=0; lastLap=0; lapCount=0;
+  swRunning=false; cancelAnimationFrame(swId); swElapsed=0; lastLap=0; lapCount=0; lastSeg=0;
   renderTimer(); lapsEl.innerHTML='';
   swStart.textContent='Старт'; swStart.classList.remove('warn');
   swLap.disabled=true; swReset.disabled=true;
