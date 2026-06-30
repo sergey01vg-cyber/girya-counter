@@ -229,6 +229,48 @@
 
 <script>
 "use strict";
+
+/* ============ Аналитика ============
+   Считаем продуктовые события и атрибуцию источника. Два приёмника:
+   1) Яндекс.Метрика (впишите номер счётчика в ANALYTICS.ymId) — источники
+      трафика, аудитория, гео, устройства, удержание, вебвизор, цели-воронка.
+   2) Свой бэкенд /track (впишите ANALYTICS.api) — события, привязанные к
+      пользователю/тарифу, для монетизационной воронки.
+   Пока поля null — события просто никуда не уходят (ошибок нет). */
+const ANALYTICS = {
+  ymId: null,   // ← номер счётчика Яндекс.Метрики, напр. 99887766
+  api:  null,   // ← URL бэкенда, напр. 'https://api.ket.gasbase.ru'
+};
+let cid = localStorage.getItem('girya_cid');
+if(!cid){ cid = (window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+'-'+Math.random()); localStorage.setItem('girya_cid', cid); }
+(function(){                                   // первичная атрибуция (first-touch)
+  if(localStorage.getItem('girya_attr')) return;
+  const p=new URLSearchParams(location.search);
+  localStorage.setItem('girya_attr', JSON.stringify({
+    utm_source:p.get('utm_source')||'', utm_medium:p.get('utm_medium')||'',
+    utm_campaign:p.get('utm_campaign')||'', ref:(document.referrer||'').slice(0,200), landed:Date.now()
+  }));
+})();
+if(ANALYTICS.ymId){                            // загрузка Яндекс.Метрики, только если задан id
+  (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};m[i].l=1*new Date();
+  k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+  (window,document,'script','https://mc.yandex.ru/metrika/tag.js','ym');
+  ym(ANALYTICS.ymId,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
+}
+function track(event, props){
+  props = props || {};
+  try{ if(window.ym && ANALYTICS.ymId) ym(ANALYTICS.ymId,'reachGoal',event,props); }catch(e){}
+  try{
+    if(ANALYTICS.api){
+      fetch(ANALYTICS.api+'/track',{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,
+        body:JSON.stringify({ cid, event, props, tier:(typeof tier!=='undefined'?tier:null), ts:Date.now(),
+          attr:JSON.parse(localStorage.getItem('girya_attr')||'{}'),
+          lang:navigator.language, w:screen.width, h:screen.height,
+          ua:navigator.userAgent.slice(0,180) })}).catch(()=>{});
+    }
+  }catch(e){}
+}
+
 /* ---------- Elements ---------- */
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
@@ -277,6 +319,7 @@ let tier = 'all';
 const tierSel = document.getElementById('tierSel');
 const tierInfo = document.getElementById('tierInfo');
 function paywall(msg){
+  track('paywall_view', {tier, msg});
   alert(msg+'\n\nТекущий тариф: '+TIERS[tier].name+'\nИзменить можно во временном переключателе «Тариф».');
 }
 function applyTier(){
@@ -304,7 +347,7 @@ function applyTier(){
     '. Видео: '+(T.video?(T.brand?'да, со ссылкой ket.gasbase.ru':'да, без логотипа'):'нет')+
     '. История: '+(T.history?'да':'нет')+'.';
 }
-tierSel.addEventListener('change', ()=>{ tier=tierSel.value; applyTier(); });
+tierSel.addEventListener('change', ()=>{ tier=tierSel.value; applyTier(); track('tier_switch', {tier}); });
 
 /* ---------- Modes ---------- */
 document.getElementById('modes').addEventListener('click', e=>{
@@ -314,6 +357,7 @@ document.getElementById('modes').addEventListener('click', e=>{
   m.classList.add('active');
   mode = m.dataset.mode;
   repState='down';
+  track('exercise_select', {mode});
 });
 
 /* ---------- Options ---------- */
@@ -361,6 +405,7 @@ function speak(n){
 function onRep(){
   reps++; repTimes.push(performance.now()); updateReps(); updateTempo(); beep(); speak(reps);
   repNum.animate([{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:200});
+  if(reps===1) track('first_rep', {mode});
 }
 
 /* ---------- Camera ---------- */
@@ -386,13 +431,14 @@ async function startCamera(){
   await video.play();
   overlay.width = video.videoWidth; overlay.height = video.videoHeight;
   running=true; camBtn.textContent='⏸ Стоп'; camMsg.style.display='none';
+  track('camera_start', {mode, facing, engine: tf.getBackend?tf.getBackend():''});
   loop();
   startCountdown();
 }
 function startCountdown(){
   // сброс счёта на старте новой попытки
   reps=0; repState='down'; repTimes=[]; updateReps(); updateTempo();
-  if(!countdownChk.checked){ counting=true; return; }
+  if(!countdownChk.checked){ counting=true; track('workout_start', {mode}); return; }
   counting=false;
   let n=10;
   countdownEl.classList.add('show'); countdownEl.classList.remove('go');
@@ -408,7 +454,7 @@ function startCountdown(){
       clearInterval(cdTimer); cdTimer=null;
       countdownEl.classList.add('go'); cdNum.textContent='Старт!'; cdLbl.textContent='Начинайте!';
       tone(1040,.4);
-      setTimeout(()=>{ countdownEl.classList.remove('show','go'); counting=true; }, 700);
+      setTimeout(()=>{ countdownEl.classList.remove('show','go'); counting=true; track('workout_start', {mode}); }, 700);
     }
   },1000);
 }
@@ -422,6 +468,7 @@ function stopCamera(){
   camBtn.textContent='▶ Камера'; camMsg.style.display='flex';
   camMsg.textContent='Камера остановлена.'; fpsBadge.textContent='камера выкл.';
   octx.clearRect(0,0,overlay.width,overlay.height);
+  if(reps>0) track('set_summary', {mode, reps, tempo:curTempo, secs:Math.round(swValue()/1000)});
   lastKps=null;
 }
 async function ensureDetector(){
@@ -528,6 +575,7 @@ function startRec(){
     recBtn.textContent='■ Стоп ('+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')+')';
   },500);
   recBtn.textContent='■ Стоп (00:00)';
+  track('video_record_start', {tier, mode});
 }
 function stopRec(){
   if(mediaRecorder && mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} }
@@ -546,6 +594,7 @@ saveVidBtn.onclick = ()=>{
   const a=document.createElement('a'); a.href=recBlobUrl;
   a.download='trenirovka_girya_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.'+recExt;
   document.body.appendChild(a); a.click(); a.remove();
+  track('video_save', {tier});
 };
 
 /* ---------- Keypoint indices (MoveNet) ---------- */
@@ -701,6 +750,7 @@ saveBtn.onclick=()=>{
   const arr=loadHist();
   arr.push({ ts:Date.now(), mode:MODE_NAMES[mode]||mode, reps:reps, time:fmtPlain(swValue()), tempo:curTempo });
   saveHist(arr); renderHist();
+  track('workout_save', {mode, reps, tempo:curTempo});
   const t=saveBtn.textContent; saveBtn.textContent='✓ Сохранено';
   setTimeout(()=>saveBtn.textContent=t,1500);
 };
@@ -715,6 +765,7 @@ exportBtn.onclick=()=>{
   a.href=url; a.download='trenirovki_girya_'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
+  track('csv_export', {count: arr.length});
 };
 clearHistBtn.onclick=()=>{ if(confirm('Удалить всю историю тренировок?')){ saveHist([]); renderHist(); } };
 histEl.addEventListener('click', e=>{
@@ -724,6 +775,10 @@ histEl.addEventListener('click', e=>{
 });
 renderHist();
 applyTier();   // применить ограничения тарифа при загрузке
+track('app_open', { tier, returning: !!localStorage.getItem('girya_seen') });
+localStorage.setItem('girya_seen','1');
+window.addEventListener('pagehide', ()=>track('session_end', { secs: Math.round((Date.now()-sessionStart)/1000) }));
+let sessionStart = Date.now();
 
 /* keep screen awake if supported */
 let wakeLock=null;
