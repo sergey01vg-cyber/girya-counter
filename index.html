@@ -108,6 +108,12 @@
   footer{padding:8px 16px max(10px,env(safe-area-inset-bottom));text-align:center;color:var(--muted);font-size:11px;}
   .adj{display:flex;gap:8px;align-items:center;}
   .adj button{flex:0 0 52px;padding:12px 0;font-size:20px;}
+  .mode.locked{opacity:.45;}
+  .mode.locked::after{content:' 🔒';font-weight:700;}
+  .sel{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:12px;padding:12px;font-size:15px;font-weight:700;font-family:inherit;}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5;}
+  .lock-tag{font-size:11px;color:var(--accent2);font-weight:700;}
 </style>
 </head>
 <body>
@@ -146,6 +152,17 @@
   <div class="row" style="margin-top:10px">
     <button class="sec" id="recBtn">⏺ Запись видео</button>
     <button class="sec" id="saveVidBtn" disabled>⬇ Сохранить видео</button>
+  </div>
+
+  <!-- Tier (temporary test switch until Telegram login + payment are wired) -->
+  <div class="panel" id="tierPanel">
+    <h2>Тариф · тест (до входа и оплаты)</h2>
+    <select class="sel" id="tierSel">
+      <option value="ryvok">199 ₽ — Рывок (без видео и истории)</option>
+      <option value="tolchok">399 ₽ — Толчок + Рывок (видео со ссылкой, история)</option>
+      <option value="all" selected>499 ₽ — Всё (видео без логотипа, все функции)</option>
+    </select>
+    <div class="note" id="tierInfo"></div>
   </div>
 
   <!-- Modes -->
@@ -245,10 +262,54 @@ const MODE_NAMES = { jerk:'Толчок', longcycle:'Длинный цикл', s
 let repState = 'down';      // 'down' | 'holding' | 'counted'
 let holdStart = 0;          // когда руки зашли в верхнюю фиксацию
 const HOLD_MS = 100;        // обязательная фиксация вверху, мс
+let lastKps = null;         // последние ключевые точки (для записи видео)
+
+/* ---------- Tariffs / entitlements ----------
+   ВАЖНО: пока это клиентская заглушка с тест-переключателем. После подключения
+   входа через Telegram и оплаты значение tier будет приходить с сервера
+   (подписанный токен), а проверка — на бэкенде. */
+const TIERS = {
+  ryvok:   { name:'Рывок · 199 ₽',          modes:['snatch'],                   video:false, history:false, brand:true  },
+  tolchok: { name:'Толчок + Рывок · 399 ₽', modes:['jerk','snatch'],            video:true,  history:true,  brand:true  },
+  all:     { name:'Всё · 499 ₽',            modes:['jerk','snatch','longcycle'],video:true,  history:true,  brand:false }
+};
+let tier = 'all';
+const tierSel = document.getElementById('tierSel');
+const tierInfo = document.getElementById('tierInfo');
+function paywall(msg){
+  alert(msg+'\n\nТекущий тариф: '+TIERS[tier].name+'\nИзменить можно во временном переключателе «Тариф».');
+}
+function applyTier(){
+  const T = TIERS[tier];
+  // Режимы: блокируем недоступные
+  document.querySelectorAll('.mode').forEach(el=>{
+    const allowed = T.modes.includes(el.dataset.mode);
+    el.classList.toggle('locked', !allowed);
+  });
+  // Если активный режим больше не доступен — переключаемся на первый разрешённый
+  if(!T.modes.includes(mode)){
+    mode = T.modes[0];
+    document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active', x.dataset.mode===mode));
+    repState='down';
+  }
+  // Видео
+  if(T.video){ recBtn.disabled=false; if(recBtn.textContent.startsWith('Видео')) recBtn.textContent='⏺ Запись видео'; }
+  else { stopRec && stopRec(); recBtn.disabled=true; recBtn.textContent='Видео — тариф 399+'; saveVidBtn.disabled=true; }
+  // История
+  saveBtn.disabled = !T.history;
+  saveBtn.textContent = T.history ? '💾 Сохранить подход' : 'История — тариф 399+';
+  exportBtn.disabled = !T.history;
+  // Подсказка
+  tierInfo.innerHTML = 'Доступно: '+T.modes.map(m=>MODE_NAMES[m]).join(', ')+
+    '. Видео: '+(T.video?(T.brand?'да, со ссылкой ket.gasbase.ru':'да, без логотипа'):'нет')+
+    '. История: '+(T.history?'да':'нет')+'.';
+}
+tierSel.addEventListener('change', ()=>{ tier=tierSel.value; applyTier(); });
 
 /* ---------- Modes ---------- */
 document.getElementById('modes').addEventListener('click', e=>{
   const m = e.target.closest('.mode'); if(!m) return;
+  if(m.classList.contains('locked')){ paywall('Это упражнение недоступно в вашем тарифе.'); return; }
   document.querySelectorAll('.mode').forEach(x=>x.classList.remove('active'));
   m.classList.add('active');
   mode = m.dataset.mode;
@@ -361,6 +422,7 @@ function stopCamera(){
   camBtn.textContent='▶ Камера'; camMsg.style.display='flex';
   camMsg.textContent='Камера остановлена.'; fpsBadge.textContent='камера выкл.';
   octx.clearRect(0,0,overlay.width,overlay.height);
+  lastKps=null;
 }
 async function ensureDetector(){
   if(detector) return;
@@ -393,18 +455,60 @@ const recBtn = document.getElementById('recBtn');
 const saveVidBtn = document.getElementById('saveVidBtn');
 const recDot = document.getElementById('recDot');
 let mediaRecorder=null, recChunks=[], recBlobUrl=null, recMime='', recExt='webm', recStart=0, recTimer=null;
+let recCanvas=null, recCtx=null, recRaf=null;
 function pickMime(){
   const cands=['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
   if(!('MediaRecorder' in window)) return '';
   for(const m of cands){ try{ if(MediaRecorder.isTypeSupported(m)) return m; }catch(e){} }
   return '';
 }
+/* Рисуем кадр для записи: видео + скелет + показатели (счёт, темп, время),
+   и для тарифа 399 — ссылку ket.gasbase.ru. Для 499 ссылки/логотипа нет. */
+function recDraw(){
+  if(!recCtx) return;
+  const w=recCanvas.width, h=recCanvas.height;
+  try{ recCtx.drawImage(video,0,0,w,h); }catch(e){}
+  if(skeletonChk.checked && lastKps){
+    recCtx.lineWidth=Math.max(3,w*0.006); recCtx.strokeStyle='rgba(61,220,132,.85)'; recCtx.fillStyle='#ffb020';
+    BONES.forEach(([a,b])=>{ const p=pt(lastKps,a),q=pt(lastKps,b);
+      if(p&&q){ recCtx.beginPath(); recCtx.moveTo(p.x,p.y); recCtx.lineTo(q.x,q.y); recCtx.stroke(); } });
+    lastKps.forEach(k=>{ if(k.score>=CONF){ recCtx.beginPath(); recCtx.arc(k.x,k.y,Math.max(3,w*0.007),0,7); recCtx.fill(); } });
+  }
+  const pad=Math.round(w*0.035);
+  recCtx.textAlign='left'; recCtx.textBaseline='top';
+  recCtx.shadowColor='rgba(0,0,0,.65)'; recCtx.shadowBlur=Math.round(w*0.012);
+  recCtx.fillStyle='#3ddc84'; recCtx.font='800 '+Math.round(w*0.13)+'px sans-serif';
+  recCtx.fillText(String(reps), pad, pad);
+  let y=pad+Math.round(w*0.135);
+  recCtx.fillStyle='#fff'; recCtx.font='700 '+Math.round(w*0.042)+'px sans-serif';
+  recCtx.fillText('повторений', pad, y); y+=Math.round(w*0.058);
+  recCtx.fillStyle='#ffb020';
+  recCtx.fillText((curTempo||0)+' /мин', pad, y); y+=Math.round(w*0.058);
+  recCtx.fillStyle='#fff';
+  recCtx.fillText('Время '+fmtPlain(swValue()), pad, y);
+  recCtx.textAlign='right'; recCtx.font='700 '+Math.round(w*0.04)+'px sans-serif';
+  recCtx.fillText(MODE_NAMES[mode]||'', w-pad, pad);
+  if(TIERS[tier].brand){
+    recCtx.textAlign='center'; recCtx.font='800 '+Math.round(w*0.052)+'px sans-serif';
+    recCtx.fillStyle='rgba(255,255,255,.95)';
+    recCtx.fillText('ket.gasbase.ru', w/2, h-pad-Math.round(w*0.06));
+  }
+  recCtx.shadowBlur=0; recCtx.textAlign='left';
+  recRaf=requestAnimationFrame(recDraw);
+}
 function startRec(){
+  if(!TIERS[tier].video){ paywall('Запись видео доступна в тарифах 399 ₽ и 499 ₽.'); return; }
   if(!stream){ alert('Сначала включите камеру.'); return; }
   if(!('MediaRecorder' in window)){ alert('Запись видео не поддерживается этим браузером.'); return; }
+  recCanvas = recCanvas || document.createElement('canvas');
+  recCanvas.width = video.videoWidth || 720;
+  recCanvas.height = video.videoHeight || 960;
+  recCtx = recCanvas.getContext('2d');
+  recDraw();
+  const recStream = recCanvas.captureStream(30);
   recChunks=[]; recMime=pickMime();
-  try{ mediaRecorder = new MediaRecorder(stream, recMime?{mimeType:recMime}:undefined); }
-  catch(e){ alert('Не удалось начать запись: '+e.message); return; }
+  try{ mediaRecorder = new MediaRecorder(recStream, recMime?{mimeType:recMime}:undefined); }
+  catch(e){ alert('Не удалось начать запись: '+e.message); recCtx=null; return; }
   recExt = ((mediaRecorder.mimeType||recMime||'')).includes('mp4') ? 'mp4' : 'webm';
   mediaRecorder.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
   mediaRecorder.onstop = ()=>{
@@ -428,10 +532,13 @@ function startRec(){
 function stopRec(){
   if(mediaRecorder && mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} }
   mediaRecorder=null;
+  if(recRaf){ cancelAnimationFrame(recRaf); recRaf=null; }
+  recCtx=null;
   if(recTimer){ clearInterval(recTimer); recTimer=null; }
   recDot.style.display='none';
   recBtn.classList.remove('danger');
-  recBtn.textContent='⏺ Запись видео';
+  if(!TIERS[tier].video){ recBtn.textContent='Видео — тариф 399+'; }
+  else { recBtn.textContent='⏺ Запись видео'; }
 }
 recBtn.onclick = ()=>{ (mediaRecorder && mediaRecorder.state==='recording') ? stopRec() : startRec(); };
 saveVidBtn.onclick = ()=>{
@@ -522,7 +629,7 @@ async function loop(){
   if(!running) return;
   let poses=[];
   try{ poses = await detector.estimatePoses(video,{maxPoses:1,flipHorizontal:false}); }catch(e){}
-  if(poses[0]){ const kps=poses[0].keypoints; draw(kps); detectRep(kps); }
+  if(poses[0]){ const kps=poses[0].keypoints; lastKps=kps; draw(kps); detectRep(kps); }
   frames++; const now=performance.now();
   if(now-lastT>=1000){ fpsBadge.textContent=frames+' к/с'; frames=0; lastT=now; }
   rafId=requestAnimationFrame(loop);
@@ -589,6 +696,7 @@ function renderHist(){
   });
 }
 saveBtn.onclick=()=>{
+  if(!TIERS[tier].history){ paywall('Сохранение тренировок доступно в тарифах 399 ₽ и 499 ₽.'); return; }
   if(reps<=0){ alert('Сначала сделайте хотя бы одно повторение.'); return; }
   const arr=loadHist();
   arr.push({ ts:Date.now(), mode:MODE_NAMES[mode]||mode, reps:reps, time:fmtPlain(swValue()), tempo:curTempo });
@@ -615,6 +723,7 @@ histEl.addEventListener('click', e=>{
   saveHist(loadHist().filter(s=>s.ts!==ts)); renderHist();
 });
 renderHist();
+applyTier();   // применить ограничения тарифа при загрузке
 
 /* keep screen awake if supported */
 let wakeLock=null;
