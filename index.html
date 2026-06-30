@@ -244,7 +244,7 @@ let curTempo = 0;           // текущий темп, повт./мин
 const MODE_NAMES = { jerk:'Толчок', longcycle:'Длинный цикл', snatch:'Рывок' };
 let repState = 'down';      // 'down' | 'holding' | 'counted'
 let holdStart = 0;          // когда руки зашли в верхнюю фиксацию
-const HOLD_MS = 500;        // обязательная фиксация вверху, мс
+const HOLD_MS = 100;        // обязательная фиксация вверху, мс
 
 /* ---------- Modes ---------- */
 document.getElementById('modes').addEventListener('click', e=>{
