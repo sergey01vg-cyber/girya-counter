@@ -153,9 +153,52 @@
   .hist .item .del{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--muted);
     border-radius:10px;padding:7px 11px;font-size:13px;cursor:pointer;}
   footer{padding:10px 16px max(12px,env(safe-area-inset-bottom));text-align:center;color:var(--muted);font-size:11px;}
+
+  /* ФОКУС-РЕЖИМ: чистый экран — счёт сверху, камера в центре, крупный циферблат снизу */
+  .focus{position:fixed;inset:0;z-index:100;display:none;flex-direction:column;
+    background:radial-gradient(1000px 520px at 50% -10%, #16202f 0%, var(--bg) 60%);
+    padding:max(10px,env(safe-area-inset-top)) 12px max(14px,env(safe-area-inset-bottom));gap:6px;}
+  body.focus-on{overflow:hidden;}
+  body.focus-on .focus{display:flex;}
+  body.focus-on header{display:none;}
+  .f-exit{position:absolute;top:max(10px,env(safe-area-inset-top));right:12px;z-index:2;width:40px;height:40px;
+    flex:none;border-radius:50%;padding:0;background:var(--card2);border:1px solid var(--line);color:var(--text);
+    font-size:17px;font-weight:800;box-shadow:none;}
+  .f-top{text-align:center;padding-top:4px;}
+  .f-reps{font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:var(--accent);
+    font-size:clamp(58px,19vw,140px);text-shadow:0 6px 34px rgba(61,220,132,.25);}
+  .f-reps-lbl{color:var(--muted);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1.6px;margin-top:2px;}
+  .f-cam{flex:1;min-height:0;position:relative;border-radius:16px;overflow:hidden;background:#000;}
+  .f-cam .cam-wrap{position:absolute;inset:0;width:100%;height:100%;border:none;border-radius:16px;aspect-ratio:auto;}
+  body.focus-on .cam-wrap .rep-box, body.focus-on .cam-wrap .hud-timer{display:none;}
+  .f-bottom{text-align:center;}
+  .f-timer{font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;letter-spacing:1px;font-size:clamp(80px,27vw,210px);}
+  .f-timer small{font-size:.32em;color:var(--muted);font-weight:800;}
+  .f-ctrl{display:flex;gap:10px;justify-content:center;margin-top:8px;}
+  .f-ctrl button{flex:1 1 0;max-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--line);
+    border-radius:14px;padding:14px 10px;font-size:15px;font-weight:800;box-shadow:none;}
+  .f-ctrl button.stop{background:var(--danger);color:#fff;border:none;}
 </style>
 </head>
 <body>
+<!-- Фокус-режим (во весь экран во время подхода) -->
+<div id="focus" class="focus">
+  <button id="fExit" class="f-exit" aria-label="Свернуть">✕</button>
+  <div class="f-top">
+    <div class="f-reps" id="fReps">0</div>
+    <div class="f-reps-lbl">повторений · <span id="fTempo">—</span> /мин</div>
+  </div>
+  <div class="f-cam" id="fCam"></div>
+  <div class="f-bottom">
+    <div class="f-timer" id="fTimer">0:00<small>.0</small></div>
+    <div class="f-ctrl">
+      <button id="fPause">Пауза</button>
+      <button id="fLap">Круг</button>
+      <button id="fStop" class="stop">Стоп</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div class="brand"><span class="kb">Г</span>Гиря<em>·Счётчик</em></div>
   <span class="badge" id="fpsBadge">камера выкл.</span>
@@ -346,6 +389,9 @@ const sensRange = document.getElementById('sensRange');
 const countdownEl = document.getElementById('countdown');
 const cdNum = document.getElementById('cdNum');
 const cdLbl = document.getElementById('cdLbl');
+const fReps = document.getElementById('fReps');
+const fTempo = document.getElementById('fTempo');
+const fTimerEl = document.getElementById('fTimer');
 
 /* ---------- State ---------- */
 let detector = null, stream = null, running = false, rafId = null;
@@ -424,14 +470,15 @@ applyMirror();
 document.getElementById('plusBtn').onclick = ()=>{ reps++; repTimes.push(performance.now()); updateReps(); updateTempo(); };
 document.getElementById('minusBtn').onclick = ()=>{ reps=Math.max(0,reps-1); repTimes.pop(); updateReps(); updateTempo(); };
 document.getElementById('resetRepsBtn').onclick = ()=>{ reps=0; repState='down'; repTimes=[]; updateReps(); updateTempo(); };
-function updateReps(){ repNum.textContent = reps; }
+function updateReps(){ repNum.textContent = reps; if(fReps) fReps.textContent = reps; }
 function updateTempo(){
-  if(repTimes.length<2){ curTempo=0; tempoVal.textContent='— /мин'; return; }
+  if(repTimes.length<2){ curTempo=0; tempoVal.textContent='— /мин'; if(fTempo) fTempo.textContent='—'; return; }
   const last = repTimes.slice(-6);              // средний темп по последним повторам
   let sum=0; for(let i=1;i<last.length;i++) sum += last[i]-last[i-1];
   const avg = sum/(last.length-1);
   curTempo = Math.round(60000/avg);
   tempoVal.textContent = curTempo+' /мин';
+  if(fTempo) fTempo.textContent = curTempo;
 }
 
 /* ---------- Sound / Voice ---------- */
@@ -487,6 +534,7 @@ async function startCamera(){
   overlay.width = video.videoWidth; overlay.height = video.videoHeight;
   running=true; camBtn.textContent='⏸ Стоп'; camMsg.style.display='none';
   track('camera_start', {mode, facing, engine: tf.getBackend?tf.getBackend():''});
+  enterFocus();                 // разворачиваем на весь экран: счёт сверху, камера в центре, циферблат снизу
   loop();
   startCountdown();
 }
@@ -760,7 +808,10 @@ function renderTimer(){
   hudTimer.textContent=fmtMS(v);
   if(segFillEl){ segFillEl.style.width=((v%30000)/30000*100)+'%';
     segEl.classList.toggle('min', Math.floor(v/30000)%2===1); }  // жёлтая полоса перед минутой
+  if(fTimerEl) fTimerEl.innerHTML=fmtFocus(v);
 }
+function fmtFocus(ms){ const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000), t=Math.floor(ms%1000/100);
+  return m+':'+String(s).padStart(2,'0')+'<small>.'+t+'</small>'; }
 /* Русское склонение «минута/минуты/минут» */
 function plural(n,a,b,c){ n=Math.abs(n)%100; const n1=n%10;
   if(n>10&&n<20)return c; if(n1>1&&n1<5)return b; if(n1===1)return a; return c; }
@@ -905,6 +956,32 @@ histEl.addEventListener('click', e=>{
 });
 renderHist();
 applyTier();   // применить ограничения тарифа при загрузке
+
+/* ---------- Фокус-режим (во весь экран) ---------- */
+const focusEl=document.getElementById('focus'), fCam=document.getElementById('fCam');
+const fPauseBtn=document.getElementById('fPause');
+let camHome=null;
+function enterFocus(){
+  if(document.body.classList.contains('focus-on')) return;
+  const cw=document.querySelector('.cam-wrap'); if(!cw) return;
+  camHome={parent:cw.parentNode, next:cw.nextSibling};
+  fCam.appendChild(cw);                                  // переносим камеру в центр фокус-экрана
+  document.body.classList.add('focus-on');
+  fPauseBtn.textContent='Пауза';
+  if(fReps) fReps.textContent=reps; updateTempo(); renderTimer();
+  try{ const rf=focusEl.requestFullscreen||focusEl.webkitRequestFullscreen; if(rf) rf.call(focusEl); }catch(e){}
+}
+function exitFocus(){
+  if(!document.body.classList.contains('focus-on')) return;
+  const cw=fCam.querySelector('.cam-wrap');
+  if(cw && camHome) camHome.parent.insertBefore(cw, camHome.next);   // вернуть камеру на место
+  document.body.classList.remove('focus-on');
+  try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(e){}
+}
+document.getElementById('fExit').onclick = exitFocus;                 // свернуть (камера продолжает)
+document.getElementById('fLap').onclick  = ()=>{ if(!swLap.disabled) swLap.onclick(); };
+fPauseBtn.onclick = ()=>{ swStart.onclick(); fPauseBtn.textContent = swRunning?'Пауза':'Старт'; };
+document.getElementById('fStop').onclick = ()=>{ stopCamera(); exitFocus(); };
 track('app_open', { tier, returning: !!localStorage.getItem('girya_seen') });
 localStorage.setItem('girya_seen','1');
 window.addEventListener('pagehide', ()=>track('session_end', { secs: Math.round((Date.now()-sessionStart)/1000) }));
