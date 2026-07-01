@@ -154,27 +154,26 @@
     border-radius:10px;padding:7px 11px;font-size:13px;cursor:pointer;}
   footer{padding:10px 16px max(12px,env(safe-area-inset-bottom));text-align:center;color:var(--muted);font-size:11px;}
 
-  /* ФОКУС-РЕЖИМ: чистый экран — счёт сверху, камера в центре, крупный циферблат снизу */
+  /* ФОКУС-РЕЖИМ: секундомер — главный по центру, счёт сверху, камера ниже и меньше */
   .focus{position:fixed;inset:0;z-index:100;display:none;flex-direction:column;
     background:radial-gradient(1000px 520px at 50% -10%, #16202f 0%, var(--bg) 60%);
-    padding:max(10px,env(safe-area-inset-top)) 12px max(14px,env(safe-area-inset-bottom));gap:6px;}
+    padding:max(10px,env(safe-area-inset-top)) 12px max(14px,env(safe-area-inset-bottom));gap:8px;}
   body.focus-on{overflow:hidden;}
   body.focus-on .focus{display:flex;}
   body.focus-on header{display:none;}
   .f-exit{position:absolute;top:max(10px,env(safe-area-inset-top));right:12px;z-index:2;width:40px;height:40px;
     flex:none;border-radius:50%;padding:0;background:var(--card2);border:1px solid var(--line);color:var(--text);
     font-size:17px;font-weight:800;box-shadow:none;}
-  .f-top{text-align:center;padding-top:4px;}
-  .f-reps{font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:var(--accent);
-    font-size:clamp(58px,19vw,140px);text-shadow:0 6px 34px rgba(61,220,132,.25);}
-  .f-reps-lbl{color:var(--muted);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1.6px;margin-top:2px;}
-  .f-cam{flex:1;min-height:0;position:relative;border-radius:16px;overflow:hidden;background:#000;}
+  .f-hero{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;}
+  .f-reps{font-weight:900;font-variant-numeric:tabular-nums;line-height:.92;color:var(--accent);
+    font-size:clamp(38px,12vw,92px);text-shadow:0 6px 28px rgba(61,220,132,.22);}
+  .f-reps-lbl{color:var(--muted);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1.6px;margin-bottom:8px;}
+  .f-timer{font-weight:900;font-variant-numeric:tabular-nums;line-height:.88;letter-spacing:1px;font-size:clamp(96px,33vw,260px);}
+  .f-timer small{font-size:.3em;color:var(--muted);font-weight:800;}
+  .f-cam{flex:0 0 32vh;min-height:120px;position:relative;border-radius:16px;overflow:hidden;background:#000;}
   .f-cam .cam-wrap{position:absolute;inset:0;width:100%;height:100%;border:none;border-radius:16px;aspect-ratio:auto;}
   body.focus-on .cam-wrap .rep-box, body.focus-on .cam-wrap .hud-timer{display:none;}
-  .f-bottom{text-align:center;}
-  .f-timer{font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;letter-spacing:1px;font-size:clamp(80px,27vw,210px);}
-  .f-timer small{font-size:.32em;color:var(--muted);font-weight:800;}
-  .f-ctrl{display:flex;gap:10px;justify-content:center;margin-top:8px;}
+  .f-ctrl{display:flex;gap:10px;justify-content:center;}
   .f-ctrl button{flex:1 1 0;max-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--line);
     border-radius:14px;padding:14px 10px;font-size:15px;font-weight:800;box-shadow:none;}
   .f-ctrl button.stop{background:var(--danger);color:#fff;border:none;}
@@ -184,18 +183,16 @@
 <!-- Фокус-режим (во весь экран во время подхода) -->
 <div id="focus" class="focus">
   <button id="fExit" class="f-exit" aria-label="Свернуть">✕</button>
-  <div class="f-top">
+  <div class="f-hero">
     <div class="f-reps" id="fReps">0</div>
     <div class="f-reps-lbl">повторений · <span id="fTempo">—</span> /мин</div>
+    <div class="f-timer" id="fTimer">0:00<small>.0</small></div>
   </div>
   <div class="f-cam" id="fCam"></div>
-  <div class="f-bottom">
-    <div class="f-timer" id="fTimer">0:00<small>.0</small></div>
-    <div class="f-ctrl">
-      <button id="fPause">Пауза</button>
-      <button id="fLap">Круг</button>
-      <button id="fStop" class="stop">Стоп</button>
-    </div>
+  <div class="f-ctrl">
+    <button id="fPause">Пауза</button>
+    <button id="fLap">Круг</button>
+    <button id="fStop" class="stop">Стоп</button>
   </div>
 </div>
 
