@@ -99,6 +99,11 @@
   @keyframes hudflash{0%{transform:scale(1);}30%{transform:scale(1.25);color:var(--accent);border-color:var(--accent);}100%{transform:scale(1);}}
   .hud-timer.minute.flash{animation:hudflashM .9s ease;}
   @keyframes hudflashM{0%{transform:scale(1);}25%{transform:scale(1.42);color:var(--accent2);border-color:var(--accent2);}100%{transform:scale(1);}}
+  .cam-icon{position:absolute;top:14px;right:14px;z-index:7;width:46px;height:46px;flex:none;border-radius:50%;
+    display:grid;place-items:center;padding:0;background:rgba(8,11,17,.5);backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.18);color:#fff;cursor:pointer;box-shadow:none;}
+  .cam-icon svg{width:24px;height:24px;}
+  .cam-icon:active{transform:scale(.9);}
   .countdown{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     background:rgba(8,11,17,.6);backdrop-filter:blur(4px);pointer-events:none;z-index:5;}
   .countdown.show{display:flex;}
@@ -204,10 +209,18 @@
       </div>
       <div class="rec-dot" id="recDot"><i></i>REC</div>
       <div class="hud-timer" id="hudTimer">00:00</div>
+      <button class="cam-icon" id="flipBtn" title="Сменить камеру" aria-label="Сменить камеру">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 8h3l1.4-2h7.2L17 8h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
+          <path d="M9.4 13.1A2.7 2.7 0 0 1 14 11.2"/>
+          <path d="M14.6 13.9A2.7 2.7 0 0 1 10 15.8"/>
+          <polyline points="14 9.4 14.4 11.3 12.5 11.7"/>
+          <polyline points="10 17.6 9.6 15.7 11.5 15.3"/>
+        </svg>
+      </button>
     </div>
     <div class="row" style="margin-top:12px">
       <button class="big" id="camBtn">▶ Камера</button>
-      <button class="sec" id="flipBtn">⟳ Сменить</button>
     </div>
     <div class="row" style="margin-top:10px">
       <button class="sec" id="recBtn">⏺ Запись видео</button>
