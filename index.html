@@ -700,6 +700,7 @@ async function loop(){
 /* ---------- Stopwatch ---------- */
 let swT0=0, swElapsed=0, swRunning=false, swId=null, lapCount=0, lastLap=0;
 let lastSeg=0;              // последний пройденный 30-секундный рубеж (для сигналов)
+let swCountTimer=null;     // таймер 10-секундной отсрочки перед стартом
 const timerEl=document.getElementById('timer');
 const hudTimer=document.getElementById('hudTimer');
 const swStart=document.getElementById('swStart'), swLap=document.getElementById('swLap'),
@@ -753,12 +754,36 @@ function swBegin(){
   swStart.textContent='Пауза'; swStart.classList.add('warn');
   swLap.disabled=false; swReset.disabled=false;
 }
+function swRun(){                               // фактический запуск хода секундомера
+  lastSeg=Math.floor(swElapsed/30000);         // не дублировать сигнал при возобновлении
+  swRunning=true; swT0=performance.now(); tick();
+  swStart.textContent='Пауза'; swStart.classList.add('warn'); swStart.classList.remove('danger');
+  swLap.disabled=false; swReset.disabled=false;
+}
+function swCancelCountdown(){
+  if(swCountTimer){ clearInterval(swCountTimer); swCountTimer=null; }
+  swStart.textContent='Старт'; swStart.classList.remove('danger','warn');
+  renderTimer();
+}
+function swCountdown(){                         // 10-секундная отсрочка перед стартом
+  if(!countdownChk.checked){ swRun(); return; }
+  let n=10;
+  swReset.disabled=false;
+  swStart.textContent='Отмена'; swStart.classList.add('danger'); swStart.classList.remove('warn');
+  const show=(x)=>{ timerEl.innerHTML='<span style="color:var(--accent2)">'+x+'</span>'; hudTimer.textContent='старт '+x; };
+  show(n); tone(660,.12);
+  swCountTimer=setInterval(()=>{
+    n--;
+    if(n>0){ show(n); tone(n<=3?780:660,.12); }
+    else { clearInterval(swCountTimer); swCountTimer=null; tone(1040,.35); swRun(); }
+  },1000);
+}
 swStart.onclick=()=>{
+  if(swCountTimer){ swCancelCountdown(); return; }      // идёт отсчёт → отмена
   if(!swRunning){
-    lastSeg=Math.floor(swElapsed/30000);   // не дублировать сигнал при возобновлении
-    swRunning=true; swT0=performance.now(); tick();
-    swStart.textContent='Пауза'; swStart.classList.add('warn');
-    swLap.disabled=false; swReset.disabled=false;
+    if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+    if(swElapsed>0) swRun();                            // возобновление после паузы — без отсчёта
+    else swCountdown();                                // старт с нуля — с отсрочкой 10 с
   }else{
     swRunning=false; swElapsed+=performance.now()-swT0; cancelAnimationFrame(swId);
     swStart.textContent='Старт'; swStart.classList.remove('warn');
@@ -772,9 +797,10 @@ swLap.onclick=()=>{
   lapsEl.prepend(d);
 };
 swReset.onclick=()=>{
+  if(swCountTimer){ clearInterval(swCountTimer); swCountTimer=null; }
   swRunning=false; cancelAnimationFrame(swId); swElapsed=0; lastLap=0; lapCount=0; lastSeg=0;
   renderTimer(); lapsEl.innerHTML='';
-  swStart.textContent='Старт'; swStart.classList.remove('warn');
+  swStart.textContent='Старт'; swStart.classList.remove('warn','danger');
   swLap.disabled=true; swReset.disabled=true;
 };
 renderTimer();
